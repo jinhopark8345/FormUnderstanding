@@ -286,7 +286,7 @@ class FUNSDSpadeELDataset(Dataset):
                 text_box_idx += 1
 
             label2text_box_indices_list[label].append(text_box_indices)
-        tokens_length_list: List[int] = [len(l) for l in label2text_box_indices_list]
+
 
         # convert linkings from "text_box to list of text_box" to "text_box idx to text_box idx"
         from_text_box_idx2to_text_box_idx = []
@@ -296,6 +296,7 @@ class FUNSDSpadeELDataset(Dataset):
                     (text_box2text_box_idx[from_text_box], text_box2text_box_idx[to_text_box])
                 )
 
+        tokens_length_list: List[int] = [len(l) for l in text_box_idx2token_indices]
         # consider [CLS] token that will be added to input_ids, shift "end token indices" 1 to the right
         et_indices = np.array(list(itertools.accumulate(tokens_length_list))) + 1
 
