@@ -36,10 +36,11 @@ from tqdm import tqdm
 from transformers import (
     AutoTokenizer,
     BrosConfig,
-    BrosForTokenClassificationWithSpade,
+    BrosSpadeELForTokenClassification,
     BrosTokenizer,
 )
 
+from collections import defaultdict
 from datasets import load_dataset, load_from_disk
 
 torch.set_printoptions(threshold=2000000)
@@ -105,7 +106,7 @@ def multistep_scheduler(optimizer, warmup_steps, milestones, gamma=0.1, last_epo
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
-class FUNSDSpadeDataset(Dataset):
+class FUNSDSpadeELDataset(Dataset):
     """FUNSD BIOES tagging Dataset
 
     FUNSD : Form Understanding in Noisy Scanned Documents
@@ -145,10 +146,10 @@ class FUNSDSpadeDataset(Dataset):
     def __getitem__(self, idx):
         sample = self.examples[idx]
 
-        word_labels = sample["labels"]
-        words = sample["words"]
+        entity_labels = sample["labels"]
+        entities = sample["words"]
         linkings = sample["linkings"]
-        assert len(word_labels) == len(words)
+        assert len(entity_labels) == len(entities)
 
         width, height = sample["img"].size
         cls_bbs = [0] * 4  # bbox for first token
@@ -164,19 +165,36 @@ class FUNSDSpadeDataset(Dataset):
         stc_labels = np.ones(self.max_seq_length, dtype=np.int64) * self.max_seq_length
         el_labels = np.ones(self.max_seq_length, dtype=int) * self.max_seq_length
 
-        # convert linkings from "word_idx to word_idx" to "text_box to text_box"
-        from_text_box2to_text_box = {}
+
+        # filter empty entities
+        entities = [[e for e in l if e['text'].strip() != ""] for l in entities]
+
+        # convert linkings from "entity_idx to entity_idx" to "text_box to text_box"
+        from_text_box2to_text_box_set = defaultdict(set)
+        breakpoint()
         for linking in linkings:
             if not linking:
                 continue
-            from_word_idx, to_word_idx = linking[0]
-            from_text_box, to_text_box = words[from_word_idx][0], words[to_word_idx][0]
-            from_text_box = tuple([from_text_box["text"], tuple(from_text_box["box"])])
-            to_text_box = tuple([to_text_box["text"], tuple(to_text_box["box"])])
-            from_text_box2to_text_box[from_text_box] = to_text_box
+
+            for link in linking:
+                from_entity_idx, to_entity_idx = link
+
+                # discard if either of the entity is empty
+                if len(entities[from_entity_idx]) == 0 or len(entities[to_entity_id]) == 0:
+                    continue
+
+                from_text_box, to_text_box = entities[from_entity_idx][0], entities[to_entity_id][0]
+                from_text_box = tuple([from_text_box["text"], tuple(from_text_box["box"])])
+                to_text_box = tuple([to_text_box["text"], tuple(to_text_box["box"])])
+                from_text_box2to_text_box_set[from_text_box].add(to_text_box)
 
         """
-        in the beginning, words are like below
+        need to continue the links that are connected to "other" label
+
+        """
+
+        """
+        in the beginning, entities are like below
 
             [
                 [{'box': [147, 148, 213, 168], 'text': 'Attorney'},
@@ -195,11 +213,11 @@ class FUNSDSpadeDataset(Dataset):
                 ...
             ]
 
-        and "words" and "word_labels" are synchronized based on their indices
+        and "entities" and "entity_labels" are synchronized based on their indices
 
         1. filter out "text_box" with emtpy text
-        2. convert words into input_ids and bboxes
-            2-1. convert word into "list of text_box"
+        2. convert entities into input_ids and bboxes
+            2-1. convert entity into "list of text_box"
                 2-1-1. convert "text_box" into "list of tokens"
 
         in result we will have,
@@ -220,17 +238,17 @@ class FUNSDSpadeDataset(Dataset):
         """
 
         # 1. filter out "text_box" with emtpy text
-        word_and_label_list = []
-        for word, label in zip(words, word_labels):
-            cur_word_and_label = []
-            for e in word:
+        entity_and_label_list = []
+        for entity, label in zip(entities, entity_labels):
+            cur_entity_and_label = []
+            for e in entity:
                 if e["text"].strip() != "":
-                    cur_word_and_label.append(e)
-            if cur_word_and_label:
-                word_and_label_list.append((cur_word_and_label, label))
+                    cur_entity_and_label.append(e)
+            if cur_entity_and_label:
+                entity_and_label_list.append((cur_entity_and_label, label))
 
 
-        # 2. convert words into input_ids and bboxes
+        # 2. convert entities into input_ids and bboxes
         text_box_idx = 0
         cum_token_idx = 0
         input_ids = []
@@ -238,11 +256,11 @@ class FUNSDSpadeDataset(Dataset):
         text_box_idx2token_indices = []
         label2text_box_indices_list = {cls_name: [] for cls_name in self.class_names}
         text_box2text_box_idx = {}
-        for word_idx, (word, label) in enumerate(word_and_label_list):
+        for entity_idx, (entity, label) in enumerate(entity_and_label_list):
             text_box_indices = []
 
-            # 2-1. convert word into "list of text_box"
-            for text_and_box in word:
+            # 2-1. convert entity into "list of text_box"
+            for text_and_box in entity:
                 text_box_indices.append(text_box_idx)
 
                 text, box = text_and_box["text"], text_and_box["box"]
@@ -268,11 +286,17 @@ class FUNSDSpadeDataset(Dataset):
             label2text_box_indices_list[label].append(text_box_indices)
         tokens_length_list: List[int] = [len(l) for l in label2text_box_indices_list]
 
-        # convert linkings from "text_box to text_box" to "text_box idx to text_box idx"
-        from_text_box_idx2to_text_box_idx = {
-            text_box2text_box_idx[from_text_box]: text_box2text_box_idx[to_text_box]
-            for from_text_box, to_text_box in from_text_box2to_text_box.items()
-        }
+        # convert linkings from "text_box to list of text_box" to "text_box idx to text_box idx"
+        from_text_box_idx2to_text_box_idx = []
+        for from_text_box, to_text_box_set in from_text_box2to_text_box_set.items():
+            for to_text_box in to_text_box_set:
+                from_text_box_idx2to_text_box_idx.append(
+                    (text_box2text_box_idx[from_text_box], text_box2text_box_idx[to_text_box])
+                )
+
+        if sample['filename'] == '00070353.png':
+            breakpoint()
+
 
         # consider [CLS] token that will be added to input_ids, shift "end token indices" 1 to the right
         et_indices = np.array(list(itertools.accumulate(tokens_length_list))) + 1
@@ -295,7 +319,8 @@ class FUNSDSpadeDataset(Dataset):
         are_box_end_tokens[et_indices] = True
 
         # from_text_box_idx2to_text_box_idx = {k-1: v-1 for k, v in from_text_box_idx2to_text_box_idx.items()}
-        for from_idx, to_idx in from_text_box_idx2to_text_box_idx.items():
+        from_text_box_idx2to_text_box_idx.sort(key=lambda e: (e[0], e[1]))
+        for from_idx, to_idx in from_text_box_idx2to_text_box_idx:
 
             if from_idx >= len(text_box_idx2token_indices) or to_idx >= len(text_box_idx2token_indices):
                 continue
@@ -306,9 +331,9 @@ class FUNSDSpadeDataset(Dataset):
             ):
                 continue
 
-            word_from = text_box_idx2token_indices[from_idx][0]
-            word_to = text_box_idx2token_indices[to_idx][0]
-            el_labels[word_to] = word_from
+            from_token_idx = text_box_idx2token_indices[from_idx][0]
+            to_token_idx = text_box_idx2token_indices[to_idx][0]
+            el_labels[to_token_idx] = from_token_idx
 
 
         # For [CLS] and [SEP]
@@ -349,11 +374,11 @@ class FUNSDSpadeDataset(Dataset):
         el_labels = torch.from_numpy(el_labels)
 
         return_dict = {
+            "filename": sample["filename"],
             "input_ids": padded_input_ids,
             "bbox": padded_bboxes,
             "attention_mask": attention_mask,
             "are_box_first_tokens": are_box_first_tokens,
-            "are_box_end_tokens": are_box_end_tokens,
             "el_labels": el_labels,
             "itc_labels": itc_labels,
             "stc_labels": stc_labels,
@@ -425,18 +450,15 @@ class BROSModelPLModule(pl.LightningModule):
         bbox = batch["bbox"]
         attention_mask = batch["attention_mask"]
         are_box_first_tokens = batch["are_box_first_tokens"]
-        # itc_labels = batch["itc_labels"]
-        # stc_labels = batch["stc_labels"]
-        el_labels = batch["el_labels"]
+        labels = batch["el_labels"]
 
         # inference model
         prediction = self.model(
             input_ids=input_ids,
             bbox=bbox,
             attention_mask=attention_mask,
-            itc_mask=are_box_first_tokens,
-            itc_labels=itc_labels,
-            stc_labels=stc_labels,
+            box_first_token_mask=are_box_first_tokens,
+            labels=labels,
         )
 
         loss = prediction.loss
@@ -450,18 +472,15 @@ class BROSModelPLModule(pl.LightningModule):
         bbox = batch["bbox"]
         attention_mask = batch["attention_mask"]
         are_box_first_tokens = batch["are_box_first_tokens"]
-        are_box_end_tokens = batch["are_box_end_tokens"]
-        itc_labels = batch["itc_labels"]
-        stc_labels = batch["stc_labels"]
+        labels = batch["el_labels"]
 
         # inference model
         prediction = self.model(
             input_ids=input_ids,
             bbox=bbox,
             attention_mask=attention_mask,
-            itc_mask=are_box_first_tokens,
-            itc_labels=itc_labels,
-            stc_labels=stc_labels,
+            box_first_token_mask=are_box_first_tokens,
+            labels=labels,
         )
 
         self.log_dict({"val_loss": prediction.loss}, sync_dist=True, prog_bar=True)
@@ -618,14 +637,14 @@ def train(cfg):
     tokenizer = BrosTokenizer.from_pretrained(cfg.tokenizer_path)
 
     # prepare FUNSD dataset
-    train_dataset = FUNSDSpadeDataset(
+    train_dataset = FUNSDSpadeELDataset(
         dataset=cfg.dataset,
         tokenizer=tokenizer,
         max_seq_length=cfg.model.max_seq_length,
         split="train",
     )
 
-    val_dataset = FUNSDSpadeDataset(
+    val_dataset = FUNSDSpadeELDataset(
         dataset=cfg.dataset,
         tokenizer=tokenizer,
         max_seq_length=cfg.model.max_seq_length,
@@ -650,7 +669,7 @@ def train(cfg):
     bros_config.num_labels = len(train_dataset.class_names)
 
     ## load pretrained model
-    bros_model = BrosForTokenClassificationWithSpade.from_pretrained(
+    bros_model = BrosSpadeELForTokenClassification.from_pretrained(
         cfg.model.pretrained_model_name_or_path, config=bros_config
     )
 
@@ -713,8 +732,8 @@ def train(cfg):
 if __name__ == "__main__":
     # load training config
     finetune_funsd_ee_bioes_config = {
-        "workspace": "./finetune_funsd_el_spade__bros-base-uncased",
-        "exp_name": "finetune_funsd_el_spade__bros-base-uncased_1",
+        "workspace": "./finetune_funsd_el_spade",
+        "exp_name": "finetune_funsd_el_spade__bros-base-uncased",
         "tokenizer_path": "naver-clova-ocr/bros-base-uncased",
         "dataset": "jinho8345/funsd",
         "task": "el",
@@ -735,7 +754,7 @@ if __name__ == "__main__":
             "strategy": "ddp_find_unused_parameters_true",
             "clip_gradient_algorithm": "norm",
             "clip_gradient_value": 1.0,
-            "num_workers": 8,
+            "num_workers": 0,
             "optimizer": {
                 "method": "adamw",
                 "params": {"lr": 5e-05},
@@ -743,7 +762,7 @@ if __name__ == "__main__":
             },
             "val_interval": 1,
         },
-        "val": {"batch_size": 1, "num_workers": 8, "limit_val_batches": 1.0},
+        "val": {"batch_size": 1, "num_workers": 0, "limit_val_batches": 1.0},
     }
 
     # convert dictionary to omegaconf and update config
