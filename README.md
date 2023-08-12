@@ -1,17 +1,17 @@
 # About FormUnderstanding
 
 [Form Understanding](https://link.springer.com/chapter/10.1007/978-3-030-86159-9_27) is a task to understand the structure of a form and extract information from it.
-And consists of three sub-tasks: 
+And consists of three sub-tasks:
 - (1) Word grouping to form entities
 - (2) Entity labeling
-- (3) Entity linking 
+- (3) Entity linking
 
 # What is an entity?
 Entities are like "NEW ITEM", "DESCRIPTION", "VICEROY Rich Lights" in the image above. (They are in red boxes)
 Entities are consist of single/multiple words like "DESCRIPTION", "NEW ITEM" and "VICEROY Rich Lights"
 
 # Entity Extraction(EE or NER) vs Entity Linking(EL)
-![FUNSD sample](assets/funsd_vis_sample/716552.jpeg) 
+![FUNSD sample](assets/funsd_vis_sample/716552.jpeg)
 *FUNSD visualized sample*
 
 From above image,
@@ -54,29 +54,29 @@ But there is a problem with this approach, which is that the order of the words 
 In FUNSD, there are 4 classes : "question", "answer", "header", "other".
 
 ##### For BIO tagging (begin, in, out)
-- single word "question" Entity : 
+- single word "question" Entity :
 ```python
 ["B-question"]
 ```
-- multiple word "question" Entity : 
+- multiple word "question" Entity :
 ```python
 ["B-question", "I-question", "I-question", "B-question", "I-question", "B-question", ...]
 ```
-- others Entity : 
+- others Entity :
 ```python
 ["O", "O", "O", ...]
 ```
 
 ##### For BIOES tagging (begin, in, out, end, single)
-- single word "question" Entity : 
+- single word "question" Entity :
 ```python
 ["S-question"]
 ```
-- multiple word "question" Entity : 
+- multiple word "question" Entity :
 ```python
 ["B-question", "I-question", "I-question", "E-question", "B-question", "I-question", "S-question", ...]
 ```
-- "others" Entity : 
+- "others" Entity :
 ```python
 ["O", "O", "O", ...]
 ```
@@ -86,6 +86,18 @@ In FUNSD, there are 4 classes : "question", "answer", "header", "other".
 
 # Entity Linking(EL) Task Approaches
 
--
+### Bros Entity Linking Approach
+- BROS tackle entity linking task by prediction "from_token index" from "to_token".
 
+### Limitations of BROS Entity Linking Approach
+![FUNSD sample](assets/funsd_vis_sample/0001485288.png)
+*FUNSD visualized sample that has table in it*
 
+- Most of the times, from_node(box) has multiple outbound arrows to to_nodes(boxes) and each of to_node has only one inbound arrow from from_node. (like "To Sample Stock" (header))
+- but in some cases, where the table is in a image like above, to_nodes can have multiple inbound arrows from from_nodes.
+- This cause a problem in BROS's Entity Linking approach.
+
+From the above image,
+- "20" is labeled as "answer". It has multiple inbound arrows. From "R&D" (question) and from "Quantity, Cartons of 200 each" (question).
+- Same goes for "Free" (answer)
+- this can happen in any other tables with column & row headers.
