@@ -484,70 +484,6 @@ class BROSModelPLModule(pl.LightningModule):
         self.log_dict({"val_loss": prediction.loss}, sync_dist=True, prog_bar=True)
 
         return prediction.loss
-        # pr_itc_labels = torch.argmax(prediction.itc_logits, -1)
-        # pr_stc_labels = torch.argmax(prediction.stc_logits, -1)
-
-        # (
-        #     n_batch_gt_classes,
-        #     n_batch_pr_classes,
-        #     n_batch_correct_classes,
-        # ) = eval_ee_spade_batch(
-        #     pr_itc_labels,
-        #     itc_labels,
-        #     are_box_first_tokens,
-        #     pr_stc_labels,
-        #     stc_labels,
-        #     attention_mask,
-        #     self.class_names,
-        #     self.dummy_idx,
-        # )
-
-        # step_out = {
-        #     "loss": prediction.loss,
-        #     "n_batch_gt_classes": n_batch_gt_classes,
-        #     "n_batch_pr_classes": n_batch_pr_classes,
-        #     "n_batch_correct_classes": n_batch_correct_classes,
-        # }
-        # self.validation_step_outputs.append(step_out)
-
-        # return step_out
-
-    # def on_validation_epoch_end(self):
-    #     all_preds = self.validation_step_outputs
-
-    #     n_total_gt_classes, n_total_pr_classes, n_total_correct_classes = 0, 0, 0
-
-    #     for step_out in all_preds:
-    #         n_total_gt_classes += step_out["n_batch_gt_classes"]
-    #         n_total_pr_classes += step_out["n_batch_pr_classes"]
-    #         n_total_correct_classes += step_out["n_batch_correct_classes"]
-
-    #     precision = (
-    #         0.0
-    #         if n_total_pr_classes == 0
-    #         else n_total_correct_classes / n_total_pr_classes
-    #     )
-    #     recall = (
-    #         0.0
-    #         if n_total_gt_classes == 0
-    #         else n_total_correct_classes / n_total_gt_classes
-    #     )
-    #     f1 = (
-    #         0.0
-    #         if recall * precision == 0
-    #         else 2.0 * recall * precision / (recall + precision)
-    #     )
-
-    #     self.log_dict(
-    #         {
-    #             "precision": precision,
-    #             "recall": recall,
-    #             "f1": f1,
-    #         },
-    #         sync_dist=True,
-    #     )
-
-    #     self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         optimizer = self._get_optimizer()
@@ -744,7 +680,7 @@ if __name__ == "__main__":
         },
         "train": {
             "ckpt_path": None,  # or None
-            "batch_size": 1,
+            "batch_size": 16,
             "num_samples_per_epoch": 149,
             "max_epochs": 30,
             "use_fp16": True,
@@ -752,7 +688,7 @@ if __name__ == "__main__":
             "strategy": "ddp_find_unused_parameters_true",
             "clip_gradient_algorithm": "norm",
             "clip_gradient_value": 1.0,
-            "num_workers": 0,
+            "num_workers": 8,
             "optimizer": {
                 "method": "adamw",
                 "params": {"lr": 5e-05},
@@ -760,7 +696,7 @@ if __name__ == "__main__":
             },
             "val_interval": 1,
         },
-        "val": {"batch_size": 1, "num_workers": 0, "limit_val_batches": 1.0},
+        "val": {"batch_size": 8, "num_workers": 8, "limit_val_batches": 1.0},
     }
 
     # convert dictionary to omegaconf and update config
