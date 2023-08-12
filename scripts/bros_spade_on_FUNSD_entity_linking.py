@@ -171,7 +171,6 @@ class FUNSDSpadeELDataset(Dataset):
 
         # convert linkings from "entity_idx to entity_idx" to "text_box to text_box"
         from_text_box2to_text_box_set = defaultdict(set)
-        breakpoint()
         for linking in linkings:
             if not linking:
                 continue
@@ -180,10 +179,13 @@ class FUNSDSpadeELDataset(Dataset):
                 from_entity_idx, to_entity_idx = link
 
                 # discard if either of the entity is empty
-                if len(entities[from_entity_idx]) == 0 or len(entities[to_entity_id]) == 0:
+                if len(entities[from_entity_idx]) == 0 or len(entities[to_entity_idx]) == 0:
                     continue
 
-                from_text_box, to_text_box = entities[from_entity_idx][0], entities[to_entity_id][0]
+                if entity_labels[from_entity_idx] == "other" or entity_labels[to_entity_idx] == "other":
+                    continue
+
+                from_text_box, to_text_box = entities[from_entity_idx][0], entities[to_entity_idx][0]
                 from_text_box = tuple([from_text_box["text"], tuple(from_text_box["box"])])
                 to_text_box = tuple([to_text_box["text"], tuple(to_text_box["box"])])
                 from_text_box2to_text_box_set[from_text_box].add(to_text_box)
@@ -294,10 +296,6 @@ class FUNSDSpadeELDataset(Dataset):
                     (text_box2text_box_idx[from_text_box], text_box2text_box_idx[to_text_box])
                 )
 
-        if sample['filename'] == '00070353.png':
-            breakpoint()
-
-
         # consider [CLS] token that will be added to input_ids, shift "end token indices" 1 to the right
         et_indices = np.array(list(itertools.accumulate(tokens_length_list))) + 1
 
@@ -318,8 +316,7 @@ class FUNSDSpadeELDataset(Dataset):
         are_box_first_tokens[st_indices] = True
         are_box_end_tokens[et_indices] = True
 
-        # from_text_box_idx2to_text_box_idx = {k-1: v-1 for k, v in from_text_box_idx2to_text_box_idx.items()}
-        from_text_box_idx2to_text_box_idx.sort(key=lambda e: (e[0], e[1]))
+        from_text_box_idx2to_text_box_idx = sorted(from_text_box_idx2to_text_box_idx, key=lambda e: (e[0], e[1]))
         for from_idx, to_idx in from_text_box_idx2to_text_box_idx:
 
             if from_idx >= len(text_box_idx2token_indices) or to_idx >= len(text_box_idx2token_indices):
