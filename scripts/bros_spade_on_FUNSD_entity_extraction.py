@@ -36,7 +36,7 @@ from tqdm import tqdm
 from transformers import (
     AutoTokenizer,
     BrosConfig,
-    BrosForTokenClassificationWithSpade,
+    BrosSpadeEEForTokenClassification,
     BrosTokenizer,
 )
 
@@ -86,7 +86,7 @@ def multistep_scheduler(optimizer, warmup_steps, milestones, gamma=0.1, last_epo
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-class FUNSDSpadeDataset(Dataset):
+class FUNSDSpadeEEDataset(Dataset):
     """FUNSD BIOES tagging Dataset
 
     FUNSD : Form Understanding in Noisy Scanned Documents
@@ -697,14 +697,14 @@ def train(cfg):
     tokenizer = BrosTokenizer.from_pretrained(cfg.tokenizer_path)
 
     # prepare FUNSD dataset
-    train_dataset = FUNSDSpadeDataset(
+    train_dataset = FUNSDSpadeEEDataset(
         dataset=cfg.dataset,
         tokenizer=tokenizer,
         max_seq_length=cfg.model.max_seq_length,
         split="train",
     )
 
-    val_dataset = FUNSDSpadeDataset(
+    val_dataset = FUNSDSpadeEEDataset(
         dataset=cfg.dataset,
         tokenizer=tokenizer,
         max_seq_length=cfg.model.max_seq_length,
@@ -729,7 +729,7 @@ def train(cfg):
     bros_config.num_labels = len(train_dataset.class_names)
 
     ## load pretrained model
-    bros_model = BrosForTokenClassificationWithSpade.from_pretrained(
+    bros_model = BrosSpadeEEForTokenClassification.from_pretrained(
         cfg.model.pretrained_model_name_or_path, config=bros_config
     )
 
@@ -792,7 +792,7 @@ def train(cfg):
 if __name__ == "__main__":
     # load training config
     finetune_funsd_ee_bioes_config = {
-        "workspace": "./finetune_funsd_spade_ner",
+        "workspace": "./finetune_funsd_ee_spade",
         "exp_name": "bros-base-uncased_funsd_spade_ner",
         "tokenizer_path": "naver-clova-ocr/bros-base-uncased",
         "dataset": "jinho8345/funsd",
