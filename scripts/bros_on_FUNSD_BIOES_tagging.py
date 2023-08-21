@@ -37,7 +37,7 @@ from transformers import (
     AutoTokenizer,
     BrosConfig,
     BrosForTokenClassification,
-    BrosTokenizer,
+    BrosProcessor,
 )
 
 from datasets import load_dataset, load_from_disk
@@ -704,7 +704,7 @@ def train(cfg):
     pl.seed_everything(cfg.seed)
 
     # Load Tokenizer (going to be used in dataset to to convert texts to input_ids)
-    tokenizer = BrosTokenizer.from_pretrained(cfg.tokenizer_path)
+    tokenizer = BrosProcessor.from_pretrained(cfg.tokenizer_path).tokenizer
 
     # prepare FUNSD dataset
     train_dataset = FUNSDBIOESDataset(

@@ -37,7 +37,7 @@ from transformers import (
     AutoTokenizer,
     BrosConfig,
     BrosSpadeEEForTokenClassification,
-    BrosTokenizer,
+    BrosProcessor,
 )
 
 from datasets import load_dataset, load_from_disk
@@ -514,7 +514,7 @@ class BROSModelPLModule(pl.LightningModule):
             input_ids=input_ids,
             bbox=bbox,
             attention_mask=attention_mask,
-            itc_mask=are_box_first_tokens,
+            box_first_token_mask=are_box_first_tokens,
             itc_labels=itc_labels,
             stc_labels=stc_labels,
         )
@@ -539,7 +539,7 @@ class BROSModelPLModule(pl.LightningModule):
             input_ids=input_ids,
             bbox=bbox,
             attention_mask=attention_mask,
-            itc_mask=are_box_first_tokens,
+            box_first_token_mask=are_box_first_tokens,
             itc_labels=itc_labels,
             stc_labels=stc_labels,
         )
@@ -694,7 +694,7 @@ def train(cfg):
     pl.seed_everything(cfg.seed)
 
     # Load Tokenizer (going to be used in dataset to to convert texts to input_ids)
-    tokenizer = BrosTokenizer.from_pretrained(cfg.tokenizer_path)
+    tokenizer = BrosProcessor.from_pretrained(cfg.tokenizer_path).tokenizer
 
     # prepare FUNSD dataset
     train_dataset = FUNSDSpadeEEDataset(
@@ -732,6 +732,7 @@ def train(cfg):
     bros_model = BrosSpadeEEForTokenClassification.from_pretrained(
         cfg.model.pretrained_model_name_or_path, config=bros_config
     )
+
 
     # model module setting
     model_module = BROSModelPLModule(cfg, tokenizer=tokenizer)
