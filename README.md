@@ -7,7 +7,7 @@ And consists of three sub-tasks:
 - (3) Entity linking
 
 # What is an entity?
-Entities are like "NEW ITEM", "DESCRIPTION", "VICEROY Rich Lights" in the image above. (They are in red boxes)
+Entities are like "NEW ITEM", "DESCRIPTION", "VICEROY Rich Lights" in the image below. (They are in red boxes)
 Entities are consist of single/multiple words like "DESCRIPTION", "NEW ITEM" and "VICEROY Rich Lights"
 
 # Entity Extraction(EE or NER) vs Entity Linking(EL)
