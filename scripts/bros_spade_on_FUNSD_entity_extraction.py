@@ -140,8 +140,8 @@ class FUNSDSpadeEEDataset(Dataset):
         are_box_first_tokens = np.zeros(self.max_seq_length, dtype=np.bool_)
         are_box_end_tokens = np.zeros(self.max_seq_length, dtype=np.bool_)
 
-        itc_labels = np.zeros(self.max_seq_length, dtype=int)
-        stc_labels = np.ones(self.max_seq_length, dtype=np.int64) * self.max_seq_length
+        initial_token_labels = np.zeros(self.max_seq_length, dtype=int)
+        subsequent_token_labels = np.ones(self.max_seq_length, dtype=np.int64) * self.max_seq_length
 
         input_ids_list: List[List[int]] = []
         labels_list: List[List[str]] = []
@@ -213,7 +213,7 @@ class FUNSDSpadeEEDataset(Dataset):
         are_box_first_tokens[st_indices] = True
         are_box_end_tokens[et_indices] = True
 
-        # make itc(initial token), stc (sequence token) labels
+        # make initial_token(initial token), subsequent_token (sequence token) labels
         for class_name in self.class_names:
             if class_name == self.out_class_name:
                 continue
@@ -231,12 +231,12 @@ class FUNSDSpadeEEDataset(Dataset):
                             break  # out of idx
 
                         if is_first:
-                            itc_labels[converted_word_idx] = self.class_idx_dic[
+                            initial_token_labels[converted_word_idx] = self.class_idx_dic[
                                 class_name
                             ]
                             is_first, last_word_idx = False, converted_word_idx
                         else:
-                            stc_labels[converted_word_idx] = last_word_idx
+                            subsequent_token_labels[converted_word_idx] = last_word_idx
                             last_word_idx = converted_word_idx
 
         # For [CLS] and [SEP]
@@ -272,8 +272,8 @@ class FUNSDSpadeEEDataset(Dataset):
         attention_mask = torch.from_numpy(attention_mask)
         are_box_first_tokens = torch.from_numpy(are_box_first_tokens)
         are_box_end_tokens = torch.from_numpy(are_box_end_tokens)
-        itc_labels = torch.from_numpy(itc_labels)
-        stc_labels = torch.from_numpy(stc_labels)
+        initial_token_labels = torch.from_numpy(initial_token_labels)
+        subsequent_token_labels = torch.from_numpy(subsequent_token_labels)
 
         return_dict = {
             "input_ids": padded_input_ids,
@@ -281,8 +281,8 @@ class FUNSDSpadeEEDataset(Dataset):
             "attention_mask": attention_mask,
             "are_box_first_tokens": are_box_first_tokens,
             "are_box_end_tokens": are_box_end_tokens,
-            "itc_labels": itc_labels,
-            "stc_labels": stc_labels,
+            "initial_token_labels": initial_token_labels,
+            "subsequent_token_labels": subsequent_token_labels,
         }
 
         return return_dict
@@ -329,28 +329,28 @@ class BROSDataPLModule(pl.LightningDataModule):
 
 
 def eval_ee_spade_batch(
-    pr_itc_labels,
-    gt_itc_labels,
+    pr_initial_token_labels,
+    gt_initial_token_labels,
     are_box_first_tokens,
-    pr_stc_labels,
-    gt_stc_labels,
+    pr_subsequent_token_labels,
+    gt_subsequent_token_labels,
     attention_mask,
     class_names,
     dummy_idx,
 ):
     n_batch_gt_classes, n_batch_pr_classes, n_batch_correct_classes = 0, 0, 0
 
-    bsz = gt_itc_labels.shape[0]
-    pr_itc_labels = pr_itc_labels.view(bsz, -1)
-    pr_stc_labels = pr_stc_labels.view(bsz, -1)
+    bsz = gt_initial_token_labels.shape[0]
+    pr_initial_token_labels = pr_initial_token_labels.view(bsz, -1)
+    pr_subsequent_token_labels = pr_subsequent_token_labels.view(bsz, -1)
 
     for example_idx in range(bsz):
         n_gt_classes, n_pr_classes, n_correct_classes = eval_ee_spade_example(
-            pr_itc_labels[example_idx],
-            gt_itc_labels[example_idx],
+            pr_initial_token_labels[example_idx],
+            gt_initial_token_labels[example_idx],
             are_box_first_tokens[example_idx],
-            pr_stc_labels[example_idx],
-            gt_stc_labels[example_idx],
+            pr_subsequent_token_labels[example_idx],
+            gt_subsequent_token_labels[example_idx],
             attention_mask[example_idx],
             class_names,
             dummy_idx,
@@ -368,25 +368,25 @@ def eval_ee_spade_batch(
 
 
 def eval_ee_spade_example(
-    pr_itc_label,
-    gt_itc_label,
+    pr_initial_token_label,
+    gt_initial_token_label,
     box_first_token_mask,
-    pr_stc_label,
-    gt_stc_label,
+    pr_subsequent_token_label,
+    gt_subsequent_token_label,
     attention_mask,
     class_names,
     dummy_idx,
 ):
     gt_first_words = parse_initial_words(
-        gt_itc_label, box_first_token_mask, class_names
+        gt_initial_token_label, box_first_token_mask, class_names
     )
     gt_class_words = parse_subsequent_words(
-        gt_stc_label, attention_mask, gt_first_words, dummy_idx
+        gt_subsequent_token_label, attention_mask, gt_first_words, dummy_idx
     )
 
-    pr_init_words = parse_initial_words(pr_itc_label, box_first_token_mask, class_names)
+    pr_init_words = parse_initial_words(pr_initial_token_label, box_first_token_mask, class_names)
     pr_class_words = parse_subsequent_words(
-        pr_stc_label, attention_mask, pr_init_words, dummy_idx
+        pr_subsequent_token_label, attention_mask, pr_init_words, dummy_idx
     )
 
     n_gt_classes, n_pr_classes, n_correct_classes = 0, 0, 0
@@ -402,32 +402,32 @@ def eval_ee_spade_example(
     return n_gt_classes, n_pr_classes, n_correct_classes
 
 
-def parse_initial_words(itc_label, box_first_token_mask, class_names):
-    itc_label_np = itc_label.cpu().numpy()
+def parse_initial_words(initial_token_label, box_first_token_mask, class_names):
+    initial_token_label_np = initial_token_label.cpu().numpy()
     box_first_token_mask_np = box_first_token_mask.cpu().numpy()
 
     outputs = [[] for _ in range(len(class_names))]
-    for token_idx, label in enumerate(itc_label_np):
+    for token_idx, label in enumerate(initial_token_label_np):
         if box_first_token_mask_np[token_idx] and label != 0:
             outputs[label].append(token_idx)
 
     return outputs
 
 
-def parse_subsequent_words(stc_label, attention_mask, init_words, dummy_idx):
+def parse_subsequent_words(subsequent_token_label, attention_mask, init_words, dummy_idx):
     max_connections = 50
 
-    valid_stc_label = stc_label * attention_mask.bool()
-    valid_stc_label = valid_stc_label.cpu().numpy()
-    stc_label_np = stc_label.cpu().numpy()
+    valid_subsequent_token_label = subsequent_token_label * attention_mask.bool()
+    valid_subsequent_token_label = valid_subsequent_token_label.cpu().numpy()
+    subsequent_token_label_np = subsequent_token_label.cpu().numpy()
 
     valid_token_indices = np.where(
-        (valid_stc_label != dummy_idx) * (valid_stc_label != 0)
+        (valid_subsequent_token_label != dummy_idx) * (valid_subsequent_token_label != 0)
     )
 
     next_token_idx_dict = {}
     for token_idx in valid_token_indices[0]:
-        next_token_idx_dict[stc_label_np[token_idx]] = token_idx
+        next_token_idx_dict[subsequent_token_label_np[token_idx]] = token_idx
 
     outputs = []
     for init_token_indices in init_words:
@@ -506,8 +506,8 @@ class BROSModelPLModule(pl.LightningModule):
         bbox = batch["bbox"]
         attention_mask = batch["attention_mask"]
         are_box_first_tokens = batch["are_box_first_tokens"]
-        itc_labels = batch["itc_labels"]
-        stc_labels = batch["stc_labels"]
+        initial_token_labels = batch["initial_token_labels"]
+        subsequent_token_labels = batch["subsequent_token_labels"]
 
         # inference model
         prediction = self.model(
@@ -515,8 +515,8 @@ class BROSModelPLModule(pl.LightningModule):
             bbox=bbox,
             attention_mask=attention_mask,
             box_first_token_mask=are_box_first_tokens,
-            itc_labels=itc_labels,
-            stc_labels=stc_labels,
+            initial_token_labels=initial_token_labels,
+            subsequent_token_labels=subsequent_token_labels,
         )
 
         loss = prediction.loss
@@ -531,8 +531,8 @@ class BROSModelPLModule(pl.LightningModule):
         attention_mask = batch["attention_mask"]
         are_box_first_tokens = batch["are_box_first_tokens"]
         are_box_end_tokens = batch["are_box_end_tokens"]
-        itc_labels = batch["itc_labels"]
-        stc_labels = batch["stc_labels"]
+        initial_token_labels = batch["initial_token_labels"]
+        subsequent_token_labels = batch["subsequent_token_labels"]
 
         # inference model
         prediction = self.model(
@@ -540,25 +540,25 @@ class BROSModelPLModule(pl.LightningModule):
             bbox=bbox,
             attention_mask=attention_mask,
             box_first_token_mask=are_box_first_tokens,
-            itc_labels=itc_labels,
-            stc_labels=stc_labels,
+            initial_token_labels=initial_token_labels,
+            subsequent_token_labels=subsequent_token_labels,
         )
 
         self.log_dict({"val_loss": prediction.loss}, sync_dist=True, prog_bar=True)
 
-        pr_itc_labels = torch.argmax(prediction.itc_logits, -1)
-        pr_stc_labels = torch.argmax(prediction.stc_logits, -1)
+        pr_initial_token_labels = torch.argmax(prediction.initial_token_logits, -1)
+        pr_subsequent_token_labels = torch.argmax(prediction.subsequent_token_logits, -1)
 
         (
             n_batch_gt_classes,
             n_batch_pr_classes,
             n_batch_correct_classes,
         ) = eval_ee_spade_batch(
-            pr_itc_labels,
-            itc_labels,
+            pr_initial_token_labels,
+            initial_token_labels,
             are_box_first_tokens,
-            pr_stc_labels,
-            stc_labels,
+            pr_subsequent_token_labels,
+            subsequent_token_labels,
             attention_mask,
             self.class_names,
             self.dummy_idx,
