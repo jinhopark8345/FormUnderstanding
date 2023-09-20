@@ -34,7 +34,6 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Dataset
 from tqdm import tqdm
 from transformers import (
-    AutoTokenizer,
     BrosConfig,
     BrosForTokenClassification,
     BrosProcessor,
@@ -270,12 +269,9 @@ class FUNSDBIOESDataset(Dataset):
         attention_mask[:len_ori_input_ids] = 1
         padded_bboxes[:len_ori_input_ids, :] = bboxes
 
-        # expand bbox from [x1, y1, x2, y2] (2points) -> [x1, y1, x2, y1, x2, y2, x1, y2] (4points)
-        padded_bboxes = padded_bboxes[:, [0, 1, 2, 1, 2, 3, 0, 3]]
-
         # Normalize bbox -> 0 ~ 1
-        padded_bboxes[:, [0, 2, 4, 6]] = padded_bboxes[:, [0, 2, 4, 6]] / width
-        padded_bboxes[:, [1, 3, 5, 7]] = padded_bboxes[:, [1, 3, 5, 7]] / height
+        padded_bboxes[:, [0, 2]] = padded_bboxes[:, [0, 2]] / width
+        padded_bboxes[:, [1, 3]] = padded_bboxes[:, [1, 3]] / height
 
         are_box_first_tokens[st_indices] = True
         are_box_end_tokens[et_indices] = True
@@ -381,7 +377,7 @@ class BROSModelPLModule(pl.LightningModule):
         input_ids = batch["input_ids"]
         bbox = batch["bbox"]
         attention_mask = batch["attention_mask"]
-        box_first_token_mask = batch["are_box_first_tokens"]
+        bbox_first_token_mask = batch["are_box_first_tokens"]
         labels = batch["labels"]
 
         # inference model
@@ -389,7 +385,7 @@ class BROSModelPLModule(pl.LightningModule):
             input_ids=input_ids,
             bbox=bbox,
             attention_mask=attention_mask,
-            box_first_token_mask=box_first_token_mask,
+            bbox_first_token_mask=bbox_first_token_mask,
             labels=labels,
         )
 
@@ -413,7 +409,7 @@ class BROSModelPLModule(pl.LightningModule):
             input_ids=input_ids,
             bbox=bbox,
             attention_mask=attention_mask,
-            box_first_token_mask=are_box_first_tokens,
+            bbox_first_token_mask=are_box_first_tokens,
             labels=labels,
         )
 
@@ -426,14 +422,14 @@ class BROSModelPLModule(pl.LightningModule):
         for example_idx, (
             pred_label,
             gt_label,
-            box_first_token_mask,
+            bbox_first_token_mask,
             box_end_token_mask,
         ) in enumerate(
             zip(pred_labels, gt_labels, are_box_first_tokens, are_box_end_tokens)
         ):
             # validation loss : # calculate validation loss of "box_first_tokens" only
-            valid_gt_label = gt_label[box_first_token_mask]
-            valid_pred_label = pred_label[box_first_token_mask]
+            valid_gt_label = gt_label[bbox_first_token_mask]
+            valid_pred_label = pred_label[bbox_first_token_mask]
 
             gt_parse = parse_from_seq(valid_gt_label, self.class_names)
             pred_parse = parse_from_seq(valid_pred_label, self.class_names)
@@ -457,11 +453,11 @@ class BROSModelPLModule(pl.LightningModule):
             n_batch_pred_classes += n_pred_classes
             n_batch_correct_classes += n_correct_classes
 
-            box_first_token_idx2ori_idx = box_first_token_mask.nonzero(as_tuple=True)[0]
+            box_first_token_idx2ori_idx = bbox_first_token_mask.nonzero(as_tuple=True)[0]
             box2token_span_maps = (
                 torch.hstack(
                     (
-                        (box_first_token_mask == True).nonzero(),
+                        (bbox_first_token_mask == True).nonzero(),
                         (box_end_token_mask == True).nonzero(),
                     )
                 )
@@ -558,18 +554,6 @@ class BROSModelPLModule(pl.LightningModule):
                         input_ids[example_idx][text_span]
                     )
                     incorrect_cls2text[cls_name].append(incorrect_text)
-
-        print("prediction: ...")
-        for cls, text in pred_cls2text.items():
-            pprint(f"   {cls} : {text}")
-
-        print("gt: ...")
-        for cls, text in gt_cls2text.items():
-            pprint(f"   {cls} : {text}")
-
-        print("correct: ...")
-        for cls, text in correct_cls2text.items():
-            pprint(f"   {cls} : {text}")
 
         step_out = {
             "n_batch_gt_classes": n_batch_gt_classes,
@@ -806,7 +790,7 @@ if __name__ == "__main__":
         "cudnn_deterministic": False,
         "cudnn_benchmark": True,
         "model": {
-            "pretrained_model_name_or_path": "naver-clova-ocr/bros-base-uncased",
+            "pretrained_model_name_or_path": "jinho8345/bros-base-uncased",
             "max_seq_length": 512,
         },
         "train": {

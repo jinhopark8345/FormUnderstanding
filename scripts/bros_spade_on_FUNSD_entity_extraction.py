@@ -259,12 +259,9 @@ class FUNSDSpadeEEDataset(Dataset):
         attention_mask[:len_ori_input_ids] = 1
         padded_bboxes[:len_ori_input_ids, :] = bboxes
 
-        # expand bbox from [x1, y1, x2, y2] (2points) -> [x1, y1, x2, y1, x2, y2, x1, y2] (4points)
-        padded_bboxes = padded_bboxes[:, [0, 1, 2, 1, 2, 3, 0, 3]]
-
         # Normalize bbox -> 0 ~ 1
-        padded_bboxes[:, [0, 2, 4, 6]] = padded_bboxes[:, [0, 2, 4, 6]] / width
-        padded_bboxes[:, [1, 3, 5, 7]] = padded_bboxes[:, [1, 3, 5, 7]] / height
+        padded_bboxes[:, [0, 2]] = padded_bboxes[:, [0, 2]] / width
+        padded_bboxes[:, [1, 3]] = padded_bboxes[:, [1, 3]] / height
 
         # convert to tensor
         padded_input_ids = torch.from_numpy(padded_input_ids)
@@ -370,7 +367,7 @@ def eval_ee_spade_batch(
 def eval_ee_spade_example(
     pr_initial_token_label,
     gt_initial_token_label,
-    box_first_token_mask,
+    bbox_first_token_mask,
     pr_subsequent_token_label,
     gt_subsequent_token_label,
     attention_mask,
@@ -378,13 +375,13 @@ def eval_ee_spade_example(
     dummy_idx,
 ):
     gt_first_words = parse_initial_words(
-        gt_initial_token_label, box_first_token_mask, class_names
+        gt_initial_token_label, bbox_first_token_mask, class_names
     )
     gt_class_words = parse_subsequent_words(
         gt_subsequent_token_label, attention_mask, gt_first_words, dummy_idx
     )
 
-    pr_init_words = parse_initial_words(pr_initial_token_label, box_first_token_mask, class_names)
+    pr_init_words = parse_initial_words(pr_initial_token_label, bbox_first_token_mask, class_names)
     pr_class_words = parse_subsequent_words(
         pr_subsequent_token_label, attention_mask, pr_init_words, dummy_idx
     )
@@ -402,13 +399,13 @@ def eval_ee_spade_example(
     return n_gt_classes, n_pr_classes, n_correct_classes
 
 
-def parse_initial_words(initial_token_label, box_first_token_mask, class_names):
+def parse_initial_words(initial_token_label, bbox_first_token_mask, class_names):
     initial_token_label_np = initial_token_label.cpu().numpy()
-    box_first_token_mask_np = box_first_token_mask.cpu().numpy()
+    bbox_first_token_mask_np = bbox_first_token_mask.cpu().numpy()
 
     outputs = [[] for _ in range(len(class_names))]
     for token_idx, label in enumerate(initial_token_label_np):
-        if box_first_token_mask_np[token_idx] and label != 0:
+        if bbox_first_token_mask_np[token_idx] and label != 0:
             outputs[label].append(token_idx)
 
     return outputs
@@ -514,7 +511,7 @@ class BROSModelPLModule(pl.LightningModule):
             input_ids=input_ids,
             bbox=bbox,
             attention_mask=attention_mask,
-            box_first_token_mask=are_box_first_tokens,
+            bbox_first_token_mask=are_box_first_tokens,
             initial_token_labels=initial_token_labels,
             subsequent_token_labels=subsequent_token_labels,
         )
@@ -539,7 +536,7 @@ class BROSModelPLModule(pl.LightningModule):
             input_ids=input_ids,
             bbox=bbox,
             attention_mask=attention_mask,
-            box_first_token_mask=are_box_first_tokens,
+            bbox_first_token_mask=are_box_first_tokens,
             initial_token_labels=initial_token_labels,
             subsequent_token_labels=subsequent_token_labels,
         )
@@ -802,7 +799,7 @@ if __name__ == "__main__":
         "cudnn_deterministic": False,
         "cudnn_benchmark": True,
         "model": {
-            "pretrained_model_name_or_path": "naver-clova-ocr/bros-base-uncased",
+            "pretrained_model_name_or_path": "jinho8345/bros-base-uncased",
             "max_seq_length": 512,
         },
         "train": {

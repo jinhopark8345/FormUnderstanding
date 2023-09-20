@@ -354,12 +354,13 @@ class FUNSDSpadeELDataset(Dataset):
         attention_mask[:len_ori_input_ids] = 1
         padded_bboxes[:len_ori_input_ids, :] = bboxes
 
-        # expand bbox from [x1, y1, x2, y2] (2points) -> [x1, y1, x2, y1, x2, y2, x1, y2] (4points)
-        padded_bboxes = padded_bboxes[:, [0, 1, 2, 1, 2, 3, 0, 3]]
 
         # Normalize bbox -> 0 ~ 1
-        padded_bboxes[:, [0, 2, 4, 6]] = padded_bboxes[:, [0, 2, 4, 6]] / width
-        padded_bboxes[:, [1, 3, 5, 7]] = padded_bboxes[:, [1, 3, 5, 7]] / height
+        padded_bboxes[:, [0, 2]] = padded_bboxes[:, [0, 2]] / width
+        padded_bboxes[:, [1, 3]] = padded_bboxes[:, [1, 3]] / height
+        # padded_bboxes = padded_bboxes[:, [0, 1, 2, 1, 2, 3, 0, 3]]
+        # padded_bboxes[:, [0, 2, 4, 6]] = padded_bboxes[:, [0, 2, 4, 6]] / width
+        # padded_bboxes[:, [1, 3, 5, 7]] = padded_bboxes[:, [1, 3, 5, 7]] / height
 
         # convert to tensor
         padded_input_ids = torch.from_numpy(padded_input_ids)
@@ -423,6 +424,53 @@ class BROSDataPLModule(pl.LightningDataModule):
                 batch[k] = batch[k].to(device)
         return batch
 
+def eval_el_spade_batch(
+    pr_el_labels,
+    gt_el_labels,
+    are_box_first_tokens,
+    dummy_idx,
+):
+    n_batch_gt_rel, n_batch_pr_rel, n_batch_correct_rel = 0, 0, 0
+
+    bsz = pr_el_labels.shape[0]
+    for example_idx in range(bsz):
+        n_gt_rel, n_pr_rel, n_correct_rel = eval_el_spade_example(
+            pr_el_labels[example_idx],
+            gt_el_labels[example_idx],
+            are_box_first_tokens[example_idx],
+            dummy_idx,
+        )
+
+        n_batch_gt_rel += n_gt_rel
+        n_batch_pr_rel += n_pr_rel
+        n_batch_correct_rel += n_correct_rel
+
+    return n_batch_gt_rel, n_batch_pr_rel, n_batch_correct_rel
+
+
+def eval_el_spade_example(pr_el_label, gt_el_label, box_first_token_mask, dummy_idx):
+    gt_relations = parse_relations(gt_el_label, box_first_token_mask, dummy_idx)
+    pr_relations = parse_relations(pr_el_label, box_first_token_mask, dummy_idx)
+
+    n_gt_rel = len(gt_relations)
+    n_pr_rel = len(pr_relations)
+    n_correct_rel = len(gt_relations & pr_relations)
+
+    return n_gt_rel, n_pr_rel, n_correct_rel
+
+def parse_relations(el_label, box_first_token_mask, dummy_idx):
+    valid_el_labels = el_label * box_first_token_mask
+    valid_el_labels = valid_el_labels.cpu().numpy()
+    el_label_np = el_label.cpu().numpy()
+
+    valid_token_indices = np.where(
+        ((valid_el_labels != dummy_idx) * (valid_el_labels != 0))
+    )
+    link_map_tuples = []
+    for token_idx in valid_token_indices[0]:
+        link_map_tuples.append((el_label_np[token_idx], token_idx))
+
+    return set(link_map_tuples)
 
 
 class BROSModelPLModule(pl.LightningModule):
@@ -455,7 +503,7 @@ class BROSModelPLModule(pl.LightningModule):
             input_ids=input_ids,
             bbox=bbox,
             attention_mask=attention_mask,
-            box_first_token_mask=are_box_first_tokens,
+            bbox_first_token_mask=are_box_first_tokens,
             labels=labels,
         )
 
@@ -477,13 +525,57 @@ class BROSModelPLModule(pl.LightningModule):
             input_ids=input_ids,
             bbox=bbox,
             attention_mask=attention_mask,
-            box_first_token_mask=are_box_first_tokens,
+            bbox_first_token_mask=are_box_first_tokens,
             labels=labels,
         )
 
         self.log_dict({"val_loss": prediction.loss}, sync_dist=True, prog_bar=True)
 
+        pr_el_labels = torch.argmax(prediction.logits, -1)
+        n_batch_gt_rel, n_batch_pr_rel, n_batch_correct_rel = eval_el_spade_batch(
+            pr_el_labels,
+            labels,
+            are_box_first_tokens,
+            self.dummy_idx,
+        )
+
+        step_out = {
+            "loss": prediction.loss,
+            "n_batch_gt_rel": n_batch_gt_rel,
+            "n_batch_pr_rel": n_batch_pr_rel,
+            "n_batch_correct_rel": n_batch_correct_rel,
+        }
+
+        self.validation_step_outputs.append(step_out)
+
         return prediction.loss
+
+    def on_validation_epoch_end(self):
+
+        all_preds = self.validation_step_outputs
+        n_total_gt_rel, n_total_pred_rel, n_total_correct_rel = 0, 0, 0
+
+        for step_out in all_preds:
+            n_total_gt_rel += step_out["n_batch_gt_rel"]
+            n_total_pred_rel += step_out["n_batch_pr_rel"]
+            n_total_correct_rel += step_out["n_batch_correct_rel"]
+
+        precision = 0.0 if n_total_pred_rel == 0 else n_total_correct_rel / n_total_pred_rel
+        recall = 0.0 if n_total_gt_rel == 0 else n_total_correct_rel / n_total_gt_rel
+        f1 = (
+            0.0
+            if recall * precision == 0
+            else 2.0 * recall * precision / (recall + precision)
+        )
+
+        self.log_dict(
+            {
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+            },
+            sync_dist=True,
+        )
 
     def configure_optimizers(self):
         optimizer = self._get_optimizer()
@@ -637,7 +729,7 @@ def train(cfg):
 
     model_summary_callback = ModelSummary(max_depth=5)
     early_stop_callback = EarlyStopping(
-        monitor="val_loss", min_delta=0.00, patience=5, verbose=True, mode="min"
+        monitor="f1", min_delta=0.00, patience=5, verbose=True, mode="max"
     )
 
     # define Trainer and start training
@@ -675,14 +767,14 @@ if __name__ == "__main__":
         "cudnn_deterministic": False,
         "cudnn_benchmark": True,
         "model": {
-            "pretrained_model_name_or_path": "naver-clova-ocr/bros-base-uncased",
+            "pretrained_model_name_or_path": "jinho8345/bros-base-uncased",
             "max_seq_length": 512,
         },
         "train": {
             "ckpt_path": None,  # or None
             "batch_size": 16,
             "num_samples_per_epoch": 149,
-            "max_epochs": 30,
+            "max_epochs": 200,
             "use_fp16": True,
             "accelerator": "gpu",
             "strategy": "ddp_find_unused_parameters_true",
